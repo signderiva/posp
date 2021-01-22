@@ -1,0 +1,23 @@
+{
+  "name": "@signderiva/posp",
+  "version": "1.0.0",
+  "description": "Ultra Simple Proof Of Space based Password hasher",
+  "main": "index.js",
+  "scripts": {
+    "test": "./node_modules/mocha/bin/mocha"
+  },
+  "keywords": [
+    "password",
+    "bcrypt",
+    "hash"
+  ],
+  "author": "Michael Vergoz",
+  "license": "ISC",
+  "devDependencies": {
+    "mocha": "^8.2.1"
+  },
+  "dependencies": {
+    "elliptic": "^6.5.3",
+    "node-jen": "^1.1.0"
+  }
+}
