@@ -14,7 +14,6 @@ function shot(name, init) {
       done()
     })
 
-
     it('Generate POSP password', function (done) {
       this.timeout(4000);
       posp.generate("Super password", (err, res) => {
@@ -66,12 +65,11 @@ function shot(name, init) {
         done()
       })
     })
-
-
   })
 }
 
 shot('Using default configuration', (done) => {
+  posp.configure()
   done()
 })
 

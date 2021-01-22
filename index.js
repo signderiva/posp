@@ -7,7 +7,6 @@
  * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
 
 const crypto = require('crypto');
-const jen = require("node-jen")();
 
 const hashesConfig = {
   sha256: {
@@ -21,20 +20,33 @@ const hashesConfig = {
 }
 
 const system = {
-  secret: jen.password(128, 128),
+  secret: null,
   xHash: "sha256", // exchange hash
-  posHash: "sha256" // proof of space hash
+  posHash: "sha256", // proof of space hash,
+
+  randomBytes: (size) => {
+    // const crypto = require('crypto');
+    return (crypto.randomBytes(size).toString("hex"))
+  },
+
+  hash: (algo, d) => {
+    // const crypto = require('crypto');
+    const h = crypto.createHash(algo)
+    h.update(d)
+    return (h.digest("hex"))
+  },
+
+  hmac: (algo, secret, d) => {
+    // const crypto = require('crypto');
+    const hmac = crypto.createHmac(algo, secret);
+    hmac.update(d);
+    return (hmac.digest("hex"))
+  }
 }
 
-
-function _hash(algo, d) {
-  const h = crypto.createHash(algo)
-  h.update(d)
-  return (h.digest("hex"))
-}
 
 function configure(input) {
-  if(!input) input = {}
+  if (!input) input = {}
 
   if (input.hasOwnProperty("secret")) {
     system.secret = input.secret;
@@ -48,7 +60,10 @@ function configure(input) {
     system.posHash = input.posHash;
   }
 
-  return(system)
+  // generate random secret
+  if (!system.secret) system.secret = system.randomBytes(128)
+
+  return (system)
 }
 
 /**
@@ -58,40 +73,29 @@ function configure(input) {
  */
 function generate(password, cb, opts) {
   opts = opts || {}
-  opts.iterate = opts.iterate || 10
-  opts.size = opts.size || 5 * 1000 * 1000
+
   if (typeof hashesConfig[opts.hash] !== "object") opts.hash = system.posHash
+  const pH = hashesConfig[opts.hash];
+
+  opts.iterate = opts.iterate || pH.iterate
+  opts.size = opts.size || pH.size
   const conf = {
     iterate: opts.iterate,
     size: opts.size,
     hash: opts.hash,
-    salt: _hash(opts.hash, jen.password(128, 128))
+    salt: system.hash(opts.hash, system.randomBytes(128))
   }
   const ret = cycle(conf, password)
   cb(null, ret)
 }
 
+
 /**
- * Compute a challenge (client-side)
- * @param {password} password - Password provided by generate() computed from client-side
- * @param {seed} seed - Challenge received from server
- * @param {cb} cb - Callback(challengeResponse)
+ * Verify a password (server & client side)
+ * @param {stored} passStored - Stored password string or object
+ * @param {password} string - Plaintext password
+ * @param {cb} cb - Callback(authed, challenge)
  */
-function computeChallenge(password, seed, cb) {
-  var self = this;
-  var pseed = seed.split(":");
-  pseed.shift();
-  pseed = pseed.join(':');
-
-  this.generate(password, (digest) => {
-    var cpassword = digest.split(':')[1];
-    var hmac = crypto.createHmac(self.hash, cpassword);
-    hmac.update(pseed);
-    cb(this.prefix.challengeResponse + ":" + hmac.digest(self.encoding) + ":" + pseed)
-  })
-}
-
-
 function verify(stored, password, cb) {
   if (typeof stored === "string") stored = unpack(stored)
   const ret = cycle(stored, password)
@@ -99,11 +103,11 @@ function verify(stored, password, cb) {
   return (cb(false, ret))
 }
 
-
-
 /**
  * Generate a challenge (server-side)
- * @param {cb} cb - Callback(challenge)
+ * @param {stored} passStored - Stored password string or object
+ * @param {opts} challengeOptions - Challenge options
+ * @param {cb} cb - Callback(error, challenge)
  */
 function generateChallenge(stored, opts, cb) {
   if (typeof stored === "string") stored = unpack(stored)
@@ -118,13 +122,15 @@ function generateChallenge(stored, opts, cb) {
     size: stored.size, // client indication
     iterate: stored.iterate, // client indication
     salt: stored.salt, // transmission salt
-    sequence: _hash(system.xHash, jen.password(128, 128)) // sequence salt
+    sequence: system.hash(system.xHash, system.randomBytes(128)) // sequence salt
   }
 
   // sign the server-side packet
-  const hmac = crypto.createHmac(system.xHash, system.secret);
-  hmac.update(`${ret.hash}:${ret.expire}:${ret.size}:${ret.iterate}:${ret.salt}:${ret.sequence}`);
-  ret.control = hmac.digest("hex")
+  ret.control = system.hmac(
+    system.xHash,
+    system.secret,
+    `${ret.hash}:${ret.expire}:${ret.size}:${ret.iterate}:${ret.salt}:${ret.sequence}`
+  )
 
   cb(null, { packet: ret, string: packChallenge(ret) })
 }
@@ -148,10 +154,12 @@ function responseChallenge(stored, password, cb) {
   const c = cycle(conf, password)
 
   // compute response challenge
-  const hmac = crypto.createHmac(system.xHash, c.last);
-  hmac.update(`${stored.control}:${c.last}`);
   const ret = Object.assign({}, stored)
-  ret.response = hmac.digest("hex")
+  ret.response = system.hmac(
+    system.xHash,
+    c.last,
+    `${stored.control}:${c.last}`
+  )
 
   cb(null, { packet: ret, string: packChallenge(ret) })
 }
@@ -161,9 +169,11 @@ function verifyChallenge(challenge, against, cb) {
   if (typeof against === "string") against = unpack(against)
 
   // verify control
-  const hmacC = crypto.createHmac(system.xHash, system.secret);
-  hmacC.update(`${challenge.hash}:${challenge.expire}:${challenge.size}:${challenge.iterate}:${challenge.salt}:${challenge.sequence}`);
-  const control = hmacC.digest("hex")
+  const control = system.hmac(
+    system.xHash,
+    system.secret,
+    `${challenge.hash}:${challenge.expire}:${challenge.size}:${challenge.iterate}:${challenge.salt}:${challenge.sequence}`
+  )
   if (challenge.control !== control) {
     cb("Invalid challenge control")
     return;
@@ -177,9 +187,11 @@ function verifyChallenge(challenge, against, cb) {
   }
 
   // self compute authentification key
-  const hmacA = crypto.createHmac(system.xHash, against.last);
-  hmacA.update(`${challenge.control}:${against.last}`);
-  const response = hmacA.digest("hex")
+  const response = system.hmac(
+    system.xHash,
+    against.last,
+    `${challenge.control}:${against.last}`
+  )
   if (challenge.response !== response) {
     cb("Invalid challenge control")
     return;
@@ -187,6 +199,7 @@ function verifyChallenge(challenge, against, cb) {
 
   cb(null)
 }
+
 
 
 function cycle(conf, password) {
@@ -199,7 +212,7 @@ function cycle(conf, password) {
     var last = block;
     for (var a = pos; a < series.length; a++) {
       const toHash = last + series[pos] + conf.salt + password
-      const hashed = _hash(conf.hash, toHash)
+      const hashed = system.hash(conf.hash, toHash)
       last = hashed;
     }
     return (last);
@@ -208,7 +221,7 @@ function cycle(conf, password) {
   // pass 1 - create initial blockchain
   do {
     const toHash = last + conf.salt + password;
-    const hashed = _hash(conf.hash, toHash);
+    const hashed = system.hash(conf.hash, toHash);
     series.push(hashed); ret.blocks++;
 
     last = hashed;
@@ -221,7 +234,7 @@ function cycle(conf, password) {
     const pos = series[a];
     const rest = showMeYouHaveTheRest(last, a);
     const toHash = last + pos + conf.salt + password + rest
-    const hashed = _hash(conf.hash, toHash)
+    const hashed = system.hash(conf.hash, toHash)
 
     series.push(hashed); ret.blocks++; // outch
 
@@ -283,7 +296,6 @@ module.exports = {
   generate,
   verify,
   generateChallenge,
-  computeChallenge,
   responseChallenge,
   verifyChallenge,
   configure,
