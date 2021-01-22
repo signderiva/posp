@@ -9,24 +9,16 @@
 const crypto = require('crypto');
 const jen = require("node-jen")();
 
-const allowedHashes = {
-  sha256: 32,
-  sha512: 64
-}
-
 const hashesConfig = {
   sha256: {
-    footprint: 32,
     iterate: 10,
     size: 5 * 1000 * 1000
   },
   sha512: {
-    footprint: 64,
     iterate: 10,
     size: 10 * 1000 * 1000
   },
 }
-
 
 const system = {
   originSecret: jen.password(128, 128),
@@ -41,7 +33,18 @@ function _hash(algo, d) {
   return (h.digest("hex"))
 }
 
-function paramter(system) {
+function configure(input) {
+  if (input.hasOwnProperty("originSecret")) {
+    system.originSecret = input.originSecret;
+  }
+
+  if (input.hasOwnProperty("xHash") && typeof hashesConfig[input.xHash] === "object") {
+    system.xHash = input.xHash;
+  }
+
+  if (input.hasOwnProperty("posHash") && typeof hashesConfig[input.posHash] === "object") {
+    system.posHash = input.posHash;
+  }
 
 }
 
@@ -84,6 +87,104 @@ function computeChallenge(password, seed, cb) {
     cb(this.prefix.challengeResponse + ":" + hmac.digest(self.encoding) + ":" + pseed)
   })
 }
+
+
+function verify(stored, password, cb) {
+  if (typeof stored === "string") stored = unpack(stored)
+  const ret = cycle(stored, password)
+  if (ret.last === stored.last) return (cb(true, ret))
+  return (cb(false, ret))
+}
+
+
+
+/**
+ * Generate a challenge (server-side)
+ * @param {cb} cb - Callback(challenge)
+ */
+function generateChallenge(stored, opts, cb) {
+  if (typeof stored === "string") stored = unpack(stored)
+  opts = opts || {}
+  opts.expire = opts.expire || 60
+
+  var plain = new Date().getTime().toString();
+
+  const ret = {
+    hash: stored.hash,
+    expire: Date.now() + (opts.expire * 1000),
+    size: stored.size, // client indication
+    iterate: stored.iterate, // client indication
+    salt: stored.salt, // transmission salt
+    sequence: _hash(system.xHash, jen.password(128, 128)) // sequence salt
+  }
+
+  // sign the server-side packet
+  const hmac = crypto.createHmac(system.xHash, system.originSecret);
+  hmac.update(`${ret.hash}:${ret.expire}:${ret.size}:${ret.iterate}:${ret.salt}:${ret.sequence}`);
+  ret.control = hmac.digest("hex")
+
+  cb(null, { packet: ret, string: packChallenge(ret) })
+}
+
+
+/**
+ * Response to a challenge (client-side)
+ * @param {stored} stored - Stored challenge response (can be unpacked)
+ * @param {password} password - Plain text password
+ * @param {cb} cb - Callback(challenge)
+ */
+function responseChallenge(stored, password, cb) {
+  if (typeof stored === "string") stored = unpackChallenge(stored)
+
+  const conf = {
+    iterate: stored.iterate,
+    size: stored.size,
+    hash: stored.hash,
+    salt: stored.salt
+  }
+  const c = cycle(conf, password)
+
+  // compute response challenge
+  const hmac = crypto.createHmac(system.xHash, c.last);
+  hmac.update(`${stored.control}:${c.last}`);
+  const ret = Object.assign({}, stored)
+  ret.response = hmac.digest("hex")
+
+  cb(null, { packet: ret, string: packChallenge(ret) })
+}
+
+function verifyChallenge(challenge, against, cb) {
+  if (typeof challenge === "string") challenge = unpackChallenge(challenge)
+  if (typeof against === "string") against = unpack(against)
+
+  // verify control
+  const hmacC = crypto.createHmac(system.xHash, system.originSecret);
+  hmacC.update(`${challenge.hash}:${challenge.expire}:${challenge.size}:${challenge.iterate}:${challenge.salt}:${challenge.sequence}`);
+  const control = hmacC.digest("hex")
+  if (challenge.control !== control) {
+    cb("Invalid challenge control")
+    return;
+  }
+
+  // verify expiration
+  const timeLim = Date.now() + (challenge.expire * 1000)
+  if (Date.now() > challenge.expire) {
+    cb("Challenge expired")
+    return;
+  }
+
+  // self compute authentification key
+  const hmacA = crypto.createHmac(system.xHash, against.last);
+  hmacA.update(`${challenge.control}:${against.last}`);
+  const response = hmacA.digest("hex")
+  if (challenge.response !== response) {
+    cb("Invalid challenge control")
+    return;
+  }
+
+  cb(null)
+}
+
 
 function cycle(conf, password) {
   const ret = { conf, size: 0, blocks: 0 }
@@ -146,13 +247,6 @@ function unpack(stored) {
   })
 }
 
-function verify(stored, password, cb) {
-  if (typeof stored === "string") stored = unpack(stored)
-  const ret = cycle(stored, password)
-  if (ret.last === stored.last) return (cb(true, ret))
-  return (cb(false, ret))
-}
-
 function packChallenge(conf) {
   const _fields = ['hash', 'expire', 'size', 'iterate', 'salt', 'sequence', 'control', 'response']
 
@@ -181,90 +275,6 @@ function unpackChallenge(stored) {
   return (ret)
 }
 
-/**
- * Generate a challenge (server-side)
- * @param {cb} cb - Callback(challenge)
- */
-function generateChallenge(stored, opts, cb) {
-  if (typeof stored === "string") stored = unpack(stored)
-  opts = opts || {}
-  opts.expire = opts.expire || 60
-
-  var plain = new Date().getTime().toString();
-
-  const ret = {
-    hash: stored.hash,
-    expire: Date.now() + (opts.expire * 1000),
-    size: stored.size, // client indication
-    iterate: stored.iterate, // client indication
-    salt: stored.salt, // transmission salt
-    sequence: _hash(system.xHash, jen.password(128, 128)) // sequence salt
-  }
-
-  // sign the server-side packet
-  const hmac = crypto.createHmac(system.xHash, system.originSecret);
-  hmac.update(`${ret.hash}:${ret.expire}:${ret.size}:${ret.iterate}:${ret.salt}:${ret.sequence}`);
-  ret.control = hmac.digest("hex")
-
-  cb(null, { packet: ret, string: packChallenge(ret) })
-}
-
-
-/**
- * Response to a challenge (client-side)
- * @param {cb} cb - Callback(challenge)
- */
-function responseChallenge(stored, password, cb) {
-  if (typeof stored === "string") stored = unpackChallenge(stored)
-
-  const conf = {
-    iterate: stored.iterate,
-    size: stored.size,
-    hash: stored.hash,
-    salt: stored.salt
-  }
-  const c = cycle(conf, password)
-
-  // compute response challenge
-  const hmac = crypto.createHmac(system.xHash, c.last);
-  hmac.update(`${stored.control}:${c.last}`);
-  const ret = Object.assign({}, stored)
-  ret.response = hmac.digest("hex")
-
-  cb(null, { packet: ret, string: packChallenge(ret) })
-}
-
-function verifyChallenge(challenge, against, cb) {
-  if (typeof challenge === "string") challenge = unpackChallenge(challenge)
-  if (typeof against === "string") against = unpack(against)
-
-  // verify control
-  const hmacC = crypto.createHmac(system.xHash, system.originSecret);
-  hmacC.update(`${challenge.hash}:${challenge.expire}:${challenge.size}:${challenge.iterate}:${challenge.salt}:${challenge.sequence}`);
-  const control = hmacC.digest("hex")
-  if (challenge.control !== control) {
-    cb("Invalid challenge control")
-    return;
-  }
-
-  // verify expiration
-  const timeLim = Date.now() + (challenge.expire * 1000)
-  if (Date.now() > challenge.expire) {
-    cb("Challenge expired")
-    return;
-  }
-
-  // self compute authentification key
-  const hmacA = crypto.createHmac(system.xHash, against.last);
-  hmacA.update(`${challenge.control}:${against.last}`);
-  const response = hmacA.digest("hex")
-  if (challenge.response !== response) {
-    cb("Invalid challenge control")
-    return;
-  }
-
-  cb(null)
-}
 
 module.exports = {
   generate,
@@ -273,6 +283,7 @@ module.exports = {
   computeChallenge,
   responseChallenge,
   verifyChallenge,
+  configure,
 
   cycle,
   pack,
