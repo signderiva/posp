@@ -14,6 +14,20 @@ const allowedHashes = {
   sha512: 64
 }
 
+const hashesConfig = {
+  sha256: {
+    footprint: 32,
+    iterate: 10,
+    size: 5 * 1000 * 1000
+  },
+  sha512: {
+    footprint: 64,
+    iterate: 10,
+    size: 10 * 1000 * 1000
+  },
+}
+
+
 const system = {
   originSecret: jen.password(128, 128),
   xHash: "sha256", // exchange hash
@@ -40,7 +54,7 @@ function generate(password, cb, opts) {
   opts = opts || {}
   opts.iterate = opts.iterate || 10
   opts.size = opts.size || 5 * 1000 * 1000
-  if (!opts.hasOwnProperty('hash') || allowedHashes[opts.hash] <= 0) opts.hash = system.posHash
+  if (typeof hashesConfig[opts.hash] !== "object") opts.hash = system.posHash
   const conf = {
     iterate: opts.iterate,
     size: opts.size,
