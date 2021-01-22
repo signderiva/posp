@@ -9,6 +9,12 @@ function shot(name, init) {
   describe(name, function () {
     it('Initializing test context', init)
 
+    // todo
+    it('Check if server secret has effect', function (done) {
+      done()
+    })
+
+
     it('Generate POSP password', function (done) {
       this.timeout(4000);
       posp.generate("Super password", (err, res) => {

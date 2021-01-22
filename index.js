@@ -21,7 +21,7 @@ const hashesConfig = {
 }
 
 const system = {
-  originSecret: jen.password(128, 128),
+  secret: jen.password(128, 128),
   xHash: "sha256", // exchange hash
   posHash: "sha256" // proof of space hash
 }
@@ -34,8 +34,10 @@ function _hash(algo, d) {
 }
 
 function configure(input) {
-  if (input.hasOwnProperty("originSecret")) {
-    system.originSecret = input.originSecret;
+  if(!input) input = {}
+
+  if (input.hasOwnProperty("secret")) {
+    system.secret = input.secret;
   }
 
   if (input.hasOwnProperty("xHash") && typeof hashesConfig[input.xHash] === "object") {
@@ -46,6 +48,7 @@ function configure(input) {
     system.posHash = input.posHash;
   }
 
+  return(system)
 }
 
 /**
@@ -119,7 +122,7 @@ function generateChallenge(stored, opts, cb) {
   }
 
   // sign the server-side packet
-  const hmac = crypto.createHmac(system.xHash, system.originSecret);
+  const hmac = crypto.createHmac(system.xHash, system.secret);
   hmac.update(`${ret.hash}:${ret.expire}:${ret.size}:${ret.iterate}:${ret.salt}:${ret.sequence}`);
   ret.control = hmac.digest("hex")
 
@@ -158,7 +161,7 @@ function verifyChallenge(challenge, against, cb) {
   if (typeof against === "string") against = unpack(against)
 
   // verify control
-  const hmacC = crypto.createHmac(system.xHash, system.originSecret);
+  const hmacC = crypto.createHmac(system.xHash, system.secret);
   hmacC.update(`${challenge.hash}:${challenge.expire}:${challenge.size}:${challenge.iterate}:${challenge.salt}:${challenge.sequence}`);
   const control = hmacC.digest("hex")
   if (challenge.control !== control) {
