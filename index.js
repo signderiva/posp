@@ -11,11 +11,11 @@ const crypto = require('crypto');
 const hashesConfig = {
   sha256: {
     iterate: 10,
-    size: 1 * 1000 * 1000
+    size: 2 * 1000 * 1000
   },
   sha512: {
     iterate: 10,
-    size: 2 * 1000 * 1000
+    size: 4 * 1000 * 1000
   },
 }
 
@@ -205,7 +205,7 @@ function verifyChallenge(challenge, against, cb) {
 function cycle(conf, password) {
   const ret = { conf, size: 0, blocks: 0 }
   const startedAt = Date.now()
-  const series = [];
+  var series = [];
 
   var last = conf.salt;
   const showMeYouHaveTheRest = (block, pos) => {
@@ -219,16 +219,20 @@ function cycle(conf, password) {
   }
 
   const drainBlockchain = (seed) => {
+    const newSeries = [];
+
     ret.size = 0;
     do {
       const toHash = `${seed}:${last}:${conf.salt}:${password}`;
       const hashed = system.hash(conf.hash, toHash);
-      series.push(hashed); ret.blocks++;
+      newSeries.push(hashed); ret.blocks++;
   
       last = hashed;
       ret.size += hashed.length;
   
     } while (ret.size < conf.size)
+
+    series = newSeries
   }
 
   // pass 1 - initial blockchain: proof of space
