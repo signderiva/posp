@@ -221,7 +221,7 @@ function cycle(conf, password) {
   const drainBlockchain = (seed) => {
     ret.size = 0;
     do {
-      const toHash = `${seed}-${last}-${conf.salt}-${password}`;
+      const toHash = `${seed}:${last}:${conf.salt}:${password}`;
       const hashed = system.hash(conf.hash, toHash);
       series.push(hashed); ret.blocks++;
   
@@ -243,7 +243,7 @@ function cycle(conf, password) {
   for (var a = conf.iterate - 1; a >= 0; a--) {
     const pos = series[a];
     const rest = showMeYouHaveTheRest(last, a);
-    const toHash = `${last}-${pos}-${conf.salt}-${password}-${rest}`;
+    const toHash = `${last}:${pos}:${conf.salt}:${password}:${rest}`;
     const hashed = system.hash(conf.hash, toHash)
 
     // here we dilute the hash in a new blockchain
