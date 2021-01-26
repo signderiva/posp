@@ -11,11 +11,11 @@ const crypto = require('crypto');
 const hashesConfig = {
   sha256: {
     iterate: 10,
-    size: 5 * 1000 * 1000
+    size: 1 * 1000 * 1000
   },
   sha512: {
     iterate: 10,
-    size: 10 * 1000 * 1000
+    size: 2 * 1000 * 1000
   },
 }
 
@@ -218,28 +218,36 @@ function cycle(conf, password) {
     return (last);
   }
 
-  // pass 1 - create initial blockchain
-  do {
-    const toHash = last + conf.salt + password;
-    const hashed = system.hash(conf.hash, toHash);
-    series.push(hashed); ret.blocks++;
+  const drainBlockchain = (seed) => {
+    ret.size = 0;
+    do {
+      const toHash = `${seed}-${last}-${conf.salt}-${password}`;
+      const hashed = system.hash(conf.hash, toHash);
+      series.push(hashed); ret.blocks++;
+  
+      last = hashed;
+      ret.size += hashed.length;
+  
+    } while (ret.size < conf.size)
+  }
 
-    last = hashed;
-    ret.size += hashed.length;
+  // pass 1 - initial blockchain: proof of space
+  drainBlockchain("POSPv1")
 
-  } while (ret.size < conf.size)
-
-  // pass 2 - proove the space of series
+  // pass 2 - proof of iteration
+  // this pass will make a hash of the checksum of the blockchain
+  // then this hash will be diluted in the blockchain which will 
+  // be completely rebuilt.
+  // at each iteration a proof of space is asked to the showMeYouHaveTheRest 
+  // function which must browse the memory aloccated by the computer.
   for (var a = conf.iterate - 1; a >= 0; a--) {
     const pos = series[a];
     const rest = showMeYouHaveTheRest(last, a);
-    const toHash = last + pos + conf.salt + password + rest
+    const toHash = `${last}-${pos}-${conf.salt}-${password}-${rest}`;
     const hashed = system.hash(conf.hash, toHash)
 
-    series.push(hashed); ret.blocks++; // outch
-
-    ret.size += hashed.length;
-    last = hashed;
+    // here we dilute the hash in a new blockchain
+    drainBlockchain(hashed)
   }
 
   ret.time = Date.now() - startedAt
